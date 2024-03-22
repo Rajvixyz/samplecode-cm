@@ -1,0 +1,7 @@
+name: 'PGT Webform'
+type: module
+description: 'Provides custom Webform elements.'
+package: 'Custom'
+core_version_requirement: ^8.8 || ^9
+dependencies:
+  - 'webform:webform'

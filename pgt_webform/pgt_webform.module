@@ -1,0 +1,108 @@
+<?php
+
+use Drupal\Core\Datetime\DrupalDateTime;
+use Drupal\paragraphs\Entity\Paragraph;
+use Drupal\user\UserInterface;
+
+function pgt_webform_user_login(UserInterface $account) {
+  // Clear field_active_file_number for users with more than 1 file number
+  $field_client_information = $account->get('field_client_information')->getValue();
+
+  if (count($field_client_information) > 1) {
+    $account->set('field_active_file_number', NULL);
+    $account->save();
+  } 
+  else if (count($field_client_information) === 1) {
+    $paragraph = Paragraph::load($field_client_information[0]['target_id']);
+    $field_file_number = $paragraph->get('field_file_number')->getValue()[0]['value'];
+    
+    $account->set('field_active_file_number', $field_file_number);
+    $account->save();
+  } 
+  else {
+    $account->set('field_active_file_number', '-1');
+    $account->save();
+  }
+}
+
+function pgt_webform_cron() {
+  $config = \Drupal::config('pgt_portal_admin_settings.settings');
+
+  // User role to check: verified_bc_services_user
+  $user_role = 'verified_bc_services_user';
+  $webform_types = [];
+
+  // Delete submissions from webform types: ?, ?, ?, ?, ?
+  $portal_forms_config = explode(',', $config->get('portal_webforms'));
+  foreach ($portal_forms_config as $form) {
+    $webform_types[] = trim($form);
+  }
+
+  // Submission retention period
+  $submission_retention_period = $config->get('submission_retention_period');
+
+  // Load all users with role 
+  /** @var \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager */
+  $entityTypeManager = \Drupal::service('entity_type.manager');
+
+  $user_query = $entityTypeManager->getStorage('user')
+    ->getQuery()
+    ->condition('status', 1)
+    ->condition('roles', $user_role);
+    
+  $uids = $user_query->execute();
+  $users = $entityTypeManager->getStorage('user')->loadMultiple($uids);
+
+  /** @var \Drupal\user\UserInterface $user */
+  foreach ($users as $user) {
+    $field_client_information = $user->get('field_client_information')->getValue();
+
+    // Loop through user's field_client_information
+    foreach ($field_client_information as $item) {
+      // Get field_file_number and field_file_start_date
+      $paragraph = Paragraph::load($item['target_id']);
+      $field_file_number = $paragraph->get('field_file_number')->getValue();
+      $field_file_start_date = $paragraph->get('field_file_start_date')->getValue();
+
+      if (!empty($field_file_number) && !empty($field_file_start_date)) {
+        $current_date_time = new DrupalDateTime('now', 'UTC');
+        $current_date_time_timestamp = $current_date_time->getTimestamp();
+
+        $date_field = new DrupalDateTime($field_file_start_date[0]['value'], 'UTC');
+        $date_field_timestamp = $date_field->getTimestamp();
+
+        $date_diff = ($current_date_time_timestamp - $date_field_timestamp) / (60 * 60 * 24);
+
+        // If current_date > field_file_start_date + 90 days
+        if ($date_diff > $submission_retention_period) {
+          // Loop through relevant webform types           
+          foreach ($webform_types as $type) {
+            // Load all submissions of this type from the user
+            $webform_submissions_storage = $entityTypeManager->getStorage('webform_submission');
+            $webform_submissions_query = $webform_submissions_storage->getQuery()->accessCheck(FALSE)
+              ->condition('webform_id', $type)
+              ->condition('uid', $user->id());
+
+            $webform_submissions_result = $webform_submissions_query->execute();
+
+            // Delete these submissions
+            foreach ($webform_submissions_result as $result) {
+              /** @var \Drupal\webform\WebformSubmissionInterface $submission */
+              $submission = $webform_submissions_storage->load($result);
+              $submission_data = $submission->getData();
+
+              if (isset($submission_data['file_number']) && $submission_data['file_number'] == $field_file_number[0]['value']) {
+                $submission->delete();
+              }
+            }
+
+            if (count($webform_submissions_result) > 0) {
+              \Drupal::logger('pgt_webform')->notice('Finished deleting submissions with file id ' . $field_file_number[0]['value'] . ' for user id ' . $user->id());
+            }
+          }
+        }
+      }
+    }
+  }
+        
+}
