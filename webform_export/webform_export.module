@@ -1,0 +1,17 @@
+<?php
+
+/**
+ * @file
+ * Provides an example of a webform handler.
+ */
+
+/**
+ * Implements hook_theme().
+ */
+function webform_export_theme() {
+  return [
+    'webform_handler_webform_export_summary' => [
+      'variables' => ['settings' => NULL, 'handler' => []],
+    ],
+  ];
+}

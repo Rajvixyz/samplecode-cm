@@ -1,0 +1,5 @@
+name: Export webform as CSV file with uploaded documents
+description: 'Provides a custom webform handler for webforms so it can generate a csv file for the subission data with uploaded documents.'
+core_version_requirement: ^8 || ^9
+package: Custom
+type: module
